@@ -1,4 +1,4 @@
-import { AnErrorOccurred } from '@strapi/helper-plugin';
+import { Page } from '@strapi/strapi/admin';
 import React from 'react';
 import { Route, Switch } from 'react-router-dom';
 
@@ -10,7 +10,7 @@ const App = () => {
     <div>
       <Switch>
         <Route path={`/plugins/${pluginId}`} component={HomePage} exact />
-        <Route component={AnErrorOccurred} />
+        <Route component={Page.Error} />
       </Switch>
     </div>
   );

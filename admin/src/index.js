@@ -1,4 +1,4 @@
-import { prefixPluginTranslations } from '@strapi/helper-plugin';
+import { prefixPluginTranslations } from '@strapi/strapi/admin';
 
 import pluginPkg from '../../package.json';
 import { ImportButton } from './components/ImportButton';

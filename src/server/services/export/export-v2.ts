@@ -300,12 +300,12 @@ async function findEntries(slug: string, deepness: number, { search, ids }: { se
     } else if (ids) {
       queryBuilder.extend({
         filters: {
-          id: { $in: ids },
+          documentId: { $in: ids },
         },
       });
     }
 
-    const entries = await strapi.entityService.findMany(slug, queryBuilder.get());
+    const entries = await strapi.documents(slug).findMany(queryBuilder.get());
 
     return entries;
   } catch (_) {

@@ -149,7 +149,7 @@ const importMedia = async (slugEntries: SlugEntries, { user, fileIdToDbId }: { u
     try {
       const dbEntry = await findOrImportFile(fileEntry, user, { allowedFileTypes: ['any'] });
       if (dbEntry) {
-        fileIdToDbId.setMapping('plugin::upload.file', fileId, dbEntry?.id);
+        fileIdToDbId.setMapping('plugin::upload.file', fileId, dbEntry?.documentId || dbEntry?.id);
       }
     } catch (err: any) {
       strapi.log.error(err);
@@ -245,7 +245,7 @@ const updateOrCreate = async (
     dbEntry = await updateOrCreateCollectionTypeEntry(user, slug, fileId, fileEntry, { idField, importStage, fileIdToDbId });
   }
   if (dbEntry) {
-    fileIdToDbId.setMapping(slug, fileId, dbEntry.id);
+    fileIdToDbId.setMapping(slug, fileId, dbEntry.documentId || dbEntry.id);
   }
 };
 
@@ -388,7 +388,13 @@ const updateOrCreateCollectionTypeEntry = async (
 
   const whereBuilder = new ObjectBuilder();
   if (fileIdToDbId.getMapping(slug, fileId)) {
-    whereBuilder.extend({ id: fileIdToDbId.getMapping(slug, fileId) });
+    const mappedId = fileIdToDbId.getMapping(slug, fileId);
+    // Use documentId if it's a string (UUID), otherwise use id for numeric values
+    if (typeof mappedId === 'string') {
+      whereBuilder.extend({ documentId: mappedId });
+    } else {
+      whereBuilder.extend({ id: mappedId });
+    }
   } else if (fileEntry[idField]) {
     whereBuilder.extend({ [idField]: fileEntry[idField] });
   }
@@ -398,9 +404,9 @@ const updateOrCreateCollectionTypeEntry = async (
     let dbEntry: Entry = await strapi.db.query(slug).findOne({ where });
 
     if (!dbEntry) {
-      return strapi.entityService.create(slug, { data: fileEntry });
+      return strapi.documents(slug).create({ data: fileEntry });
     } else {
-      return strapi.entityService.update(slug, dbEntry.id, { data: omit(fileEntry, ['id']) });
+      return strapi.documents(slug).update({ documentId: dbEntry.documentId, data: omit(fileEntry, ['id', 'documentId']) });
     }
   } else {
     if (!fileEntry.locale) {
@@ -447,9 +453,11 @@ const updateOrCreateCollectionTypeEntry = async (
 
     if (isDatumInDefaultLocale) {
       if (!dbEntryDefaultLocaleId) {
-        return strapi.entityService.create(slug, { data: fileEntry });
+        return strapi.documents(slug).create({ data: fileEntry });
       } else {
-        return strapi.entityService.update(slug, dbEntryDefaultLocaleId, { data: omit({ ...fileEntry }, ['id']) });
+        // Find the documentId for the entry
+        const defaultEntry = await strapi.db.query(slug).findOne({ where: { id: dbEntryDefaultLocaleId } });
+        return strapi.documents(slug).update({ documentId: defaultEntry.documentId, data: omit({ ...fileEntry }, ['id', 'documentId']) });
       }
     } else {
       if (!dbEntryDefaultLocaleId) {
@@ -458,9 +466,9 @@ const updateOrCreateCollectionTypeEntry = async (
 
       if (!dbEntry) {
         const insertLocalizedEntry = strapi.plugin('i18n').service('core-api').createCreateLocalizationHandler(getModel(slug));
-        return insertLocalizedEntry({ id: dbEntryDefaultLocaleId, data: omit({ ...fileEntry }, ['id']) });
+        return insertLocalizedEntry({ id: dbEntryDefaultLocaleId, data: omit({ ...fileEntry }, ['id', 'documentId']) });
       } else {
-        return strapi.entityService.update(slug, dbEntry.id, { data: omit({ ...fileEntry }, ['id']) });
+        return strapi.documents(slug).update({ documentId: dbEntry.documentId, data: omit({ ...fileEntry }, ['id', 'documentId']) });
       }
     }
   }
@@ -482,29 +490,29 @@ const updateOrCreateSingleTypeEntry = async (
       .then((entries) => toArray(entries)?.[0]);
 
     if (!dbEntry) {
-      return strapi.entityService.create(slug, { data: fileEntry });
+      return strapi.documents(slug).create({ data: fileEntry });
     } else {
-      return strapi.entityService.update(slug, dbEntry.id, { data: omit(fileEntry, ['id']) });
+      return strapi.documents(slug).update({ documentId: dbEntry.documentId, data: omit(fileEntry, ['id', 'documentId']) });
     }
   } else {
     const defaultLocale = await strapi.plugin('i18n').service('locales').getDefaultLocale();
     const isDatumInDefaultLocale = !fileEntry.locale || fileEntry.locale === defaultLocale;
 
     fileEntry = omit(fileEntry, ['localizations']);
-    if (isEmpty(omit(fileEntry, ['id']))) {
+    if (isEmpty(omit(fileEntry, ['id', 'documentId']))) {
       return null;
     }
 
     let entryDefaultLocale = await strapi.db.query(slug).findOne({ where: { locale: defaultLocale } });
     if (!entryDefaultLocale) {
-      entryDefaultLocale = await strapi.entityService.create(slug, { data: { ...fileEntry, locale: defaultLocale } });
+      entryDefaultLocale = await strapi.documents(slug).create({ data: { ...fileEntry, locale: defaultLocale } });
     }
 
     if (isDatumInDefaultLocale) {
       if (!entryDefaultLocale) {
-        return strapi.entityService.create(slug, { data: fileEntry });
+        return strapi.documents(slug).create({ data: fileEntry });
       } else {
-        return strapi.entityService.update(slug, entryDefaultLocale.id, { data: fileEntry });
+        return strapi.documents(slug).update({ documentId: entryDefaultLocale.documentId, data: fileEntry });
       }
     } else {
       const entryLocale = await strapi.db.query(slug).findOne({ where: { locale: fileEntry.locale } });

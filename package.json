@@ -46,10 +46,10 @@
     "@babel/eslint-parser": "^7.18.2",
     "@babel/preset-react": "^7.17.12",
     "@faker-js/faker": "^7.5.0",
-    "@strapi/plugin-i18n": "^4.10.5",
+    "@strapi/plugin-i18n": "^5.0.0",
     "@strapi/plugin-seo": "^1.8.0",
-    "@strapi/plugin-users-permissions": "^4.10.5",
-    "@strapi/strapi": "^4.10.5",
+    "@strapi/plugin-users-permissions": "^5.0.0",
+    "@strapi/strapi": "^5.0.0",
     "@types/fs-extra": "^11.0.1",
     "@types/jest": "^29.5.8",
     "@types/node-fetch": "^2.6.3",
@@ -67,7 +67,7 @@
     "typescript": "^5.0.3"
   },
   "peerDependencies": {
-    "@strapi/strapi": "^4.10.5"
+    "@strapi/strapi": "^5.0.0"
   },
   "author": {
     "name": "Baboo",
@@ -80,7 +80,7 @@
     }
   ],
   "engines": {
-    "node": ">=14.19.1 <=20.x.x",
+    "node": ">=18.0.0 <=24.x.x",
     "npm": ">=6.0.0"
   },
   "keywords": [

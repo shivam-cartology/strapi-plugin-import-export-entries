@@ -1,4 +1,4 @@
-import { request } from '@strapi/helper-plugin';
+import { getFetchClient } from '@strapi/strapi/admin';
 
 import pluginId from '../pluginId';
 
@@ -9,9 +9,9 @@ export const api = {
 };
 
 async function exportData({ slug, search, applySearch, exportFormat, relationsAsId, deepness, exportPluginsContentTypes }) {
-  const data = await request(`/${pluginId}/export/contentTypes`, {
-    method: 'POST',
-    body: { slug, search, applySearch, exportFormat, relationsAsId, deepness, exportPluginsContentTypes },
+  const { post } = getFetchClient();
+  const { data } = await post(`/${pluginId}/export/contentTypes`, {
+    slug, search, applySearch, exportFormat, relationsAsId, deepness, exportPluginsContentTypes
   });
   return data;
 }
@@ -23,16 +23,15 @@ async function exportData({ slug, search, applySearch, exportFormat, relationsAs
  * @returns
  */
 async function getModelAttributes({ slug }) {
-  const resData = await request(`/${pluginId}/import/model-attributes/${slug}`, {
-    method: 'GET',
-  });
+  const { get } = getFetchClient();
+  const { data: resData } = await get(`/${pluginId}/import/model-attributes/${slug}`);
   return resData.data.attribute_names;
 }
 
 async function importData({ slug, data, format, idField }) {
-  const resData = await request(`/${pluginId}/import`, {
-    method: 'POST',
-    body: { slug, data, format, idField },
+  const { post } = getFetchClient();
+  const { data: resData } = await post(`/${pluginId}/import`, {
+    slug, data, format, idField
   });
   return resData;
 }
