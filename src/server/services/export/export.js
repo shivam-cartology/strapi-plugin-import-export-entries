@@ -41,7 +41,7 @@ const exportData = async ({ slug, search, applySearch, exportFormat, relationsAs
   }
   const query = queryBuilder.get();
 
-  const entries = await strapi.entityService.findMany(slugToProcess, query);
+  const entries = await strapi.documents(slugToProcess).findMany(query);
 
   const data = convertData(entries, {
     slug: slugToProcess,

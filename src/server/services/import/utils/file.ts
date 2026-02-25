@@ -59,7 +59,7 @@ const findFile = async ({ hash, name, url, alternativeText, caption }: Partial<F
   let file = null;
 
   if (!file && hash) {
-    [file] = await strapi.entityService.findMany('plugin::upload.file', {
+    [file] = await strapi.documents('plugin::upload.file').findMany({
       filters: {
         hash: {
           $startsWith: hash,
@@ -69,7 +69,7 @@ const findFile = async ({ hash, name, url, alternativeText, caption }: Partial<F
     });
   }
   if (!file && name) {
-    [file] = await strapi.entityService.findMany('plugin::upload.file', { filters: { name }, limit: 1 });
+    [file] = await strapi.documents('plugin::upload.file').findMany({ filters: { name }, limit: 1 });
   }
   if (!file && url) {
     const checkResult = isValidFileUrl(url, allowedFileTypes);
