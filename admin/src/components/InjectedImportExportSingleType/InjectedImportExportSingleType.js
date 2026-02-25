@@ -1,5 +1,5 @@
 import { Box, Divider, Flex, Typography } from '@strapi/design-system';
-import { CheckPermissions } from '@strapi/helper-plugin';
+import { Page } from '@strapi/strapi/admin';
 import React from 'react';
 import { useIntl } from 'react-intl';
 
@@ -12,7 +12,7 @@ export const InjectedImportExportSingleType = () => {
   const { formatMessage } = useIntl();
 
   return (
-    <CheckPermissions permissions={pluginPermissions.main}>
+    <Page.Protect permissions={pluginPermissions.main}>
       <Box background="neutral0" hasRadius shadow="filterShadow" paddingTop={6} paddingBottom={4} paddingLeft={3} paddingRight={3}>
         <Typography variant="sigma" textColor="neutral600">
           {formatMessage({ id: getTrad('plugin.name') })}
@@ -28,6 +28,6 @@ export const InjectedImportExportSingleType = () => {
           </Flex>
         </Box>
       </Box>
-    </CheckPermissions>
+    </Page.Protect>
   );
 };

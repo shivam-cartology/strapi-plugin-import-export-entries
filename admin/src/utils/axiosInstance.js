@@ -2,7 +2,7 @@
  * axios with a custom config.
  */
 
-import { auth } from '@strapi/helper-plugin';
+import { auth } from '@strapi/strapi/admin';
 import axios from 'axios';
 
 const instance = axios.create({

@@ -1,5 +1,5 @@
 import { Box, Checkbox, ContentLayout, Flex, Link, Option, Select, Typography } from '@strapi/design-system';
-import { CheckPagePermissions } from '@strapi/helper-plugin';
+import { Page } from '@strapi/strapi/admin';
 import range from 'lodash/range';
 import React, { memo, useState } from 'react';
 
@@ -24,7 +24,7 @@ const HomePage = () => {
   };
 
   return (
-    <CheckPagePermissions permissions={pluginPermissions.main}>
+    <Page.Protect permissions={pluginPermissions.main}>
       <Header />
 
       <ContentLayout>
@@ -100,7 +100,7 @@ const HomePage = () => {
       </ContentLayout>
 
       <Alerts />
-    </CheckPagePermissions>
+    </Page.Protect>
   );
 };
 
