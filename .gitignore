@@ -138,3 +138,4 @@ data.sqlite
 /server/
 /types/
 uploads/
+package-lock.json

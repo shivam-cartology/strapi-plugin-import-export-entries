@@ -12,7 +12,6 @@ import {
   SchemaUID,
 } from '../../types';
 import cloneDeep from 'lodash/cloneDeep';
-import fromPairs from 'lodash/fromPairs';
 import { isEmpty, merge } from 'lodash/fp';
 import qs from 'qs';
 import { isArraySafe, toArray } from '../../../libs/arrays';
@@ -109,21 +108,46 @@ async function findEntriesForHierarchy(
   }
 
   let entries = await findEntries(slug, deepness, { search, ids })
-    .then((entries: Entry[]) => {
+    .then(async (entries: Entry[]) => {
       entries = toArray(entries).filter(Boolean);
 
       // Export locales
       if (schema.pluginOptions?.i18n?.localized) {
-        const allEntries = [...entries];
-        const entryIdsToExported = fromPairs(allEntries.map((entry) => [entry.id, true]));
+        // In Strapi v5, all locale variants share the same documentId but are separate DB rows.
+        // The Document Service returns only the default locale by default, so we must fetch
+        // all locale variants explicitly and compute the localizations field.
+        const allLocales: Array<{ code: string }> = await strapi.plugin('i18n').service('locales').find();
+        const allEntries: Entry[] = [...entries];
+        const exportedKeys = new Set<string>(entries.map((e) => `${(e as any).documentId}:${(e as any).locale}`));
+        const documentIds = entries.map((e) => (e as any).documentId).filter(Boolean) as string[];
 
-        for (const entry of entries) {
-          (entry.localizations || []).forEach((localization) => {
-            if (localization.id && !entryIdsToExported[localization.id]) {
-              allEntries.push(localization as any);
-              entryIdsToExported[localization.id] = true;
+        if (documentIds.length > 0) {
+          for (const locale of allLocales) {
+            const localeEntries = await findEntries(slug, deepness, { ids: documentIds, locale: locale.code });
+            for (const localeEntry of toArray(localeEntries).filter(Boolean)) {
+              const key = `${(localeEntry as any).documentId}:${(localeEntry as any).locale}`;
+              if (!exportedKeys.has(key)) {
+                allEntries.push(localeEntry as Entry);
+                exportedKeys.add(key);
+              }
             }
-          });
+          }
+        }
+
+        // Build localizations list (IDs of same-document entries in other locales) for each entry.
+        const documentIdToEntryIds: Record<string, number[]> = {};
+        for (const entry of allEntries) {
+          const docId = (entry as any).documentId;
+          if (docId) {
+            if (!documentIdToEntryIds[docId]) {
+              documentIdToEntryIds[docId] = [];
+            }
+            documentIdToEntryIds[docId].push(entry.id);
+          }
+        }
+        for (const entry of allEntries) {
+          const docId = (entry as any).documentId;
+          (entry as any).localizations = (documentIdToEntryIds[docId] ?? []).filter((id) => id !== entry.id);
         }
 
         return allEntries;
@@ -291,10 +315,13 @@ async function findEntriesForHierarchy(
   return store;
 }
 
-async function findEntries(slug: string, deepness: number, { search, ids }: { search?: string; ids?: EntryId[] }) {
+async function findEntries(slug: string, deepness: number, { search, ids, locale }: { search?: string; ids?: EntryId[]; locale?: string }) {
   try {
     const queryBuilder = new ObjectBuilder();
     queryBuilder.extend(getPopulateFromSchema(slug, deepness));
+    if (locale) {
+      queryBuilder.extend({ locale });
+    }
     if (search) {
       queryBuilder.extend(buildFilterQuery(search));
     } else if (ids) {

@@ -1,6 +1,5 @@
 const map = require('lodash/map');
 const pick = require('lodash/pick');
-const { getModel } = require('../../server/utils/models');
 const dataCreate = require('../mocks/data-create.json');
 const dataUpdate = require('../mocks/data-update.json');
 
@@ -43,7 +42,7 @@ describe('import service', () => {
         [SLUG]: [generateData(SLUG, { id: 1 })],
       };
 
-      await Promise.all(CONFIG_CREATE[SLUG].map((datum) => strapi.entityService.create(SLUG, { data: datum })));
+      await Promise.all(CONFIG_CREATE[SLUG].map((datum) => strapi.db.query(SLUG).create({ data: datum })));
 
       const CONFIG_UPDATE = {
         [SLUG]: [pick(generateData(SLUG, { id: 1 }), ['id', 'description', 'startDateTime'])],
@@ -76,7 +75,7 @@ describe('import service', () => {
 
       const { failures } = await getService('import').importDataV2(fileContent, { slug: SLUG, user: {}, idField: 'id' });
 
-      const entries = await strapi.entityService.findMany(SLUG, { populate: '*' });
+      const entries = await strapi.db.query(SLUG).findMany({});
 
       expect(failures.length).toBe(0);
       expect(entries.length).toBe(CONFIG[SLUG].length);
@@ -88,14 +87,13 @@ describe('import service', () => {
         expect(entry.title).toBe(configData.title);
         expect(entry.description).toBe(configData.description);
         expect(entry.locale).toBe(configData.locale);
-        expect(entry.localizations).toEqual([]);
       });
     });
 
     it('should update collection type localized', async () => {
       const SLUG = SLUGS.COLLECTION_TYPE;
 
-      await strapi.entityService.create(SLUG, { data: generateData(SLUG, { id: 1, locale: 'en' }) });
+      await strapi.db.query(SLUG).create({ data: generateData(SLUG, { id: 1, locale: 'en' }) });
 
       const CONFIG = {
         [SLUG]: [generateData(SLUG, { id: 1, locale: 'en' })],
@@ -105,7 +103,7 @@ describe('import service', () => {
 
       const { failures } = await getService('import').importDataV2(fileContent, { slug: SLUG, user: {}, idField: 'id' });
 
-      const entries = await strapi.entityService.findMany(SLUG, { populate: '*' });
+      const entries = await strapi.db.query(SLUG).findMany({});
 
       expect(failures.length).toBe(0);
       expect(entries.length).toBe(CONFIG[SLUG].length);
@@ -117,7 +115,6 @@ describe('import service', () => {
         expect(entry.title).toBe(configData.title);
         expect(entry.description).toBe(configData.description);
         expect(entry.locale).toBe(configData.locale);
-        expect(entry.localizations).toEqual([]);
       });
     });
 
@@ -135,28 +132,20 @@ describe('import service', () => {
 
       const { failures } = await getService('import').importDataV2(fileContent, { slug: SLUG, user: {}, idField: 'id' });
 
-      const entries = await strapi.db
-        .query(SLUG)
-        .findMany({ populate: ['localizations'] })
-        .then((entries) =>
-          entries.map((e) => {
-            e.localizations = e.localizations.map((l: any) => l.id);
-            return e;
-          }),
-        );
+      // In Strapi v5, all locale entries share the same documentId rather than being linked via localizations.
+      const entries = await strapi.db.query(SLUG).findMany({});
       const entriesIds = entries.map((e) => e.id);
 
       expect(failures.length).toBe(0);
+      // en, fr, it = 3 locale entries
+      expect(entries.length).toBe(3);
       entries.forEach((entry, idx) => {
-        const configData = CONFIG[SLUG][idx];
-        // Atm it is not possible to set the `id` for locales that are not the default one.
-        if (entry.locale === 'en') {
-          expect(entry.id).toBe(configData.id);
-        }
+        const configData = CONFIG[SLUG].find((c: any) => c.locale === entry.locale);
         expect(entry.title).toBe(configData.title);
         expect(entry.description).toBe(configData.description);
         expect(entry.locale).toBe(configData.locale);
-        expect(entry.localizations.sort()).toEqual(entriesIds.filter((id) => id !== entry.id).sort());
+        // All entries share the same documentId in Strapi v5.
+        expect(entry.documentId).toBe(entries[0].documentId);
       });
     });
 
@@ -167,52 +156,42 @@ describe('import service', () => {
         [SLUG]: [generateData(SLUG, { id: 2, locale: 'en' }), generateData(SLUG, { id: 1, locale: 'fr' }), generateData(SLUG, { id: 3, locale: 'it' })],
       };
 
-      // Create data.
-      await (async () => {
-        await strapi.db.query(SLUG).create({ data: CONFIG_CREATE[SLUG][0] });
-        const createHandler = strapi.plugin('i18n').service('core-api').createCreateLocalizationHandler(getModel(SLUG));
-        await createHandler({ id: CONFIG_CREATE[SLUG][0].id, data: CONFIG_CREATE[SLUG][1] });
-        await createHandler({ id: CONFIG_CREATE[SLUG][0].id, data: CONFIG_CREATE[SLUG][2] });
-      })();
+      // Create data. In Strapi v5, use the Document Service to create localized entries.
+      const enCreated = await strapi.documents(SLUG).create({ data: CONFIG_CREATE[SLUG][0] });
+      await strapi.documents(SLUG).update({ documentId: enCreated.documentId, locale: 'fr', data: CONFIG_CREATE[SLUG][1] });
+      await strapi.documents(SLUG).update({ documentId: enCreated.documentId, locale: 'it', data: CONFIG_CREATE[SLUG][2] });
 
       const CONFIG_UPDATE = {
         [SLUG]: [
-          pick(generateData(SLUG, { id: 2, locale: 'en' }), ['id', 'locale', 'localizations', 'description', 'startDateTime']),
-          pick(generateData(SLUG, { id: 1, locale: 'fr', localizations: [2] }), ['id', 'locale', 'localizations', 'description', 'startDateTime']),
-          pick(generateData(SLUG, { id: 3, locale: 'it', localizations: [2] }), ['id', 'locale', 'localizations', 'description', 'startDateTime']),
+          pick(generateData(SLUG, { locale: 'en' }), ['locale', 'description', 'startDateTime']),
+          pick(generateData(SLUG, { locale: 'fr' }), ['locale', 'description', 'startDateTime']),
+          pick(generateData(SLUG, { locale: 'it' }), ['locale', 'description', 'startDateTime']),
         ],
       };
+
+      // Set localizations to map non-default locales to the default locale entry.
+      CONFIG_UPDATE[SLUG][1].localizations = [enCreated.id];
+      CONFIG_UPDATE[SLUG][2].localizations = [enCreated.id];
 
       const fileContent = buildJsonV2FileContent(CONFIG_UPDATE);
 
       const { failures } = await getService('import').importDataV2(fileContent, { slug: SLUG, user: {}, idField: 'id' });
 
-      const entries = await strapi.db
-        .query(SLUG)
-        .findMany({ populate: ['localizations'] })
-        .then((entries) =>
-          entries.map((e) => {
-            e.localizations = e.localizations.map((l: any) => l.id);
-            return e;
-          }),
-        );
-      const entriesIds = entries.map((e) => e.id);
+      // In Strapi v5, all locale entries share the same documentId.
+      const entries = await strapi.db.query(SLUG).findMany({});
 
       expect(failures.length).toBe(0);
       entries.forEach((entry) => {
-        const createConfigData = CONFIG_CREATE[SLUG].find((c) => c.locale === entry.locale);
-        const updateConfigData = CONFIG_UPDATE[SLUG].find((c) => c.locale === entry.locale);
+        const createConfigData = CONFIG_CREATE[SLUG].find((c: any) => c.locale === entry.locale);
+        const updateConfigData = CONFIG_UPDATE[SLUG].find((c: any) => c.locale === entry.locale);
 
-        // Atm it is not possible to set the `id` for locales that are not the default one.
-        if (entry.locale === 'en') {
-          expect(entry.id).toBe(createConfigData.id);
-        }
         expect(entry.title).toBe(createConfigData.title);
         expect(entry.description).toBe(updateConfigData.description);
         // expect(entry.startDateTime).toBe(updateConfigData.startDateTime);
         expect(entry.enabled).toBe(createConfigData.enabled);
         expect(entry.locale).toBe(createConfigData.locale);
-        expect(entry.localizations.sort()).toEqual(entriesIds.filter((id) => id !== entry.id).sort());
+        // All entries share the same documentId.
+        expect(entry.documentId).toBe(entries[0].documentId);
       });
     });
 
@@ -298,7 +277,7 @@ describe('import service', () => {
     it('should update single type', async () => {
       const SLUG = SLUGS.SINGLE_TYPE_SIMPLE;
 
-      await strapi.entityService.create(SLUG, { data: generateData(SLUG, { id: 1 }) });
+      await strapi.db.query(SLUG).create({ data: generateData(SLUG, { id: 1 }) });
 
       const CONFIG = {
         [SLUG]: [generateData(SLUG, { id: 1 })],
@@ -343,7 +322,7 @@ describe('import service', () => {
     it('should update single type localized', async () => {
       const SLUG = SLUGS.SINGLE_TYPE;
 
-      await strapi.entityService.create(SLUG, { data: generateData(SLUG, { id: 1 }) });
+      await strapi.db.query(SLUG).create({ data: generateData(SLUG, { id: 1 }) });
 
       const CONFIG = {
         [SLUG]: [generateData(SLUG, { id: 1, locale: 'en' })],
@@ -393,53 +372,43 @@ describe('import service', () => {
       const SLUG = SLUGS.SINGLE_TYPE;
 
       const CONFIG_CREATE = {
-        [SLUG]: [generateData(SLUG, { id: 2, locale: 'en' }), generateData(SLUG, { id: 1, locale: 'fr' }), generateData(SLUG, { id: 3, locale: 'it' })],
+        [SLUG]: [generateData(SLUG, { locale: 'en' }), generateData(SLUG, { locale: 'fr' }), generateData(SLUG, { locale: 'it' })],
       };
 
-      // Create data.
-      await (async () => {
-        await strapi.db.query(SLUG).create({ data: CONFIG_CREATE[SLUG][0] });
-        const createHandler = strapi.plugin('i18n').service('core-api').createCreateLocalizationHandler(getModel(SLUG));
-        await createHandler({ id: CONFIG_CREATE[SLUG][0].id, data: CONFIG_CREATE[SLUG][1] });
-        await createHandler({ id: CONFIG_CREATE[SLUG][0].id, data: CONFIG_CREATE[SLUG][2] });
-      })();
+      // Create data. In Strapi v5, use the Document Service to create localized entries.
+      const enCreated = await strapi.documents(SLUG).create({ data: CONFIG_CREATE[SLUG][0] });
+      await strapi.documents(SLUG).update({ documentId: enCreated.documentId, locale: 'fr', data: CONFIG_CREATE[SLUG][1] });
+      await strapi.documents(SLUG).update({ documentId: enCreated.documentId, locale: 'it', data: CONFIG_CREATE[SLUG][2] });
 
       const CONFIG_UPDATE = {
         [SLUG]: [
-          pick(generateData(SLUG, { id: 2, locale: 'en' }), ['id', 'locale', 'description']),
-          pick(generateData(SLUG, { id: 1, locale: 'fr' }), ['id', 'locale', 'description']),
-          pick(generateData(SLUG, { id: 3, locale: 'it' }), ['id', 'locale', 'description']),
+          pick(generateData(SLUG, { locale: 'en' }), ['locale', 'description']),
+          pick(generateData(SLUG, { locale: 'fr' }), ['locale', 'description']),
+          pick(generateData(SLUG, { locale: 'it' }), ['locale', 'description']),
         ],
       };
+
+      // Set localizations to map non-default locales back to the default locale entry.
+      CONFIG_UPDATE[SLUG][1].localizations = [enCreated.id];
+      CONFIG_UPDATE[SLUG][2].localizations = [enCreated.id];
 
       const fileContent = buildJsonV2FileContent(CONFIG_UPDATE);
 
       const { failures } = await getService('import').importDataV2(fileContent, { slug: SLUG, user: {}, idField: 'id' });
 
-      const entries = await strapi.db
-        .query(SLUG)
-        .findMany({ populate: ['localizations'] })
-        .then((entries) =>
-          entries.map((e) => {
-            e.localizations = e.localizations.map((l: any) => l.id);
-            return e;
-          }),
-        );
-      const entriesIds = entries.map((e) => e.id);
+      // In Strapi v5, all locale entries share the same documentId.
+      const entries = await strapi.db.query(SLUG).findMany({});
 
       expect(failures.length).toBe(0);
       entries.forEach((entry) => {
-        const createConfigData = CONFIG_CREATE[SLUG].find((c) => c.locale === entry.locale);
-        const updateConfigData = CONFIG_UPDATE[SLUG].find((c) => c.locale === entry.locale);
+        const createConfigData = CONFIG_CREATE[SLUG].find((c: any) => c.locale === entry.locale);
+        const updateConfigData = CONFIG_UPDATE[SLUG].find((c: any) => c.locale === entry.locale);
 
-        // Atm it is not possible to set the `id` for locales that are not the default one.
-        if (entry.locale === 'en') {
-          expect(entry.id).toBe(createConfigData.id);
-        }
         expect(entry.title).toBe(createConfigData.title);
         expect(entry.description).toBe(updateConfigData.description);
         expect(entry.locale).toBe(createConfigData.locale);
-        expect(entry.localizations.sort()).toEqual(entriesIds.filter((id) => id !== entry.id).sort());
+        // All entries share the same documentId.
+        expect(entry.documentId).toBe(entries[0].documentId);
       });
     });
 
@@ -552,44 +521,42 @@ describe('import service', () => {
           utensils: {
             populate: true,
           },
-          localizations: true,
         },
       } as any);
 
       expect(entries.length).toBe(3);
 
-      expect(entries[0].name).toBe('Dubillot Brasserie');
-      expect(entries[0].locale).toBe('en');
-      expect(entries[0].description).toBe('Awesome restaurant');
-      expect(entries[0].owned_by.name).toBe('Charles');
-      expect(entries[0].utensils.length).toBe(2);
-      expect(entries[0].utensils[0].name).toBe('Fork');
-      expect(entries[0].utensils[0].made_by.name).toBe('Moulinex');
-      expect(entries[0].utensils[1].name).toBe('Knife');
-      expect(entries[0].utensils[1].made_by.name).toBe('SEB');
-      expect(entries[0].localizations.length).toBe(1);
-      expect(entries[0].localizations[0].name).toBe('Brasserie Dubillot');
-      expect(entries[0].localizations[0].locale).toBe('fr');
+      const enEntry = entries.find((e: any) => e.name === 'Dubillot Brasserie');
+      const frEntry = entries.find((e: any) => e.name === 'Brasserie Dubillot');
+      const martinEntry = entries.find((e: any) => e.name === 'Martin Brasserie');
 
-      expect(entries[1].name).toBe('Martin Brasserie');
-      expect(entries[1].locale).toBe('en');
-      expect(entries[1].description).toBe('Checkout the chicken');
-      expect(entries[1].owned_by.name).toBe('Victor');
-      expect(entries[1].utensils.length).toBe(1);
-      expect(entries[1].utensils[0].name).toBe('Fork');
+      expect(enEntry.locale).toBe('en');
+      expect(enEntry.description).toBe('Awesome restaurant');
+      expect(enEntry.owned_by.name).toBe('Charles');
+      expect(enEntry.utensils.length).toBe(2);
+      expect(enEntry.utensils[0].name).toBe('Fork');
+      expect(enEntry.utensils[0].made_by.name).toBe('Moulinex');
+      expect(enEntry.utensils[1].name).toBe('Knife');
+      expect(enEntry.utensils[1].made_by.name).toBe('SEB');
+      // In Strapi v5, the en and fr entries share the same documentId.
+      expect(enEntry.documentId).toBe(frEntry.documentId);
 
-      expect(entries[2].name).toBe('Brasserie Dubillot');
-      expect(entries[2].locale).toBe('fr');
-      expect(entries[2].description).toBe('Incroyable restaurant');
-      expect(entries[2].owned_by.name).toBe('Charles');
-      expect(entries[2].utensils.length).toBe(2);
-      expect(entries[2].utensils[0].name).toBe('Fork');
-      expect(entries[2].utensils[0].made_by.name).toBe('Moulinex');
-      expect(entries[2].utensils[1].name).toBe('Knife');
-      expect(entries[2].utensils[1].made_by.name).toBe('SEB');
-      expect(entries[2].localizations.length).toBe(1);
-      expect(entries[2].localizations[0].name).toBe('Dubillot Brasserie');
-      expect(entries[2].localizations[0].locale).toBe('en');
+      expect(martinEntry.locale).toBe('en');
+      expect(martinEntry.description).toBe('Checkout the chicken');
+      expect(martinEntry.owned_by.name).toBe('Victor');
+      expect(martinEntry.utensils.length).toBe(1);
+      expect(martinEntry.utensils[0].name).toBe('Fork');
+
+      expect(frEntry.locale).toBe('fr');
+      expect(frEntry.description).toBe('Incroyable restaurant');
+      expect(frEntry.owned_by.name).toBe('Charles');
+      expect(frEntry.utensils.length).toBe(2);
+      expect(frEntry.utensils[0].name).toBe('Fork');
+      expect(frEntry.utensils[0].made_by.name).toBe('Moulinex');
+      expect(frEntry.utensils[1].name).toBe('Knife');
+      expect(frEntry.utensils[1].made_by.name).toBe('SEB');
+      // The fr and en entries share the same documentId.
+      expect(frEntry.documentId).toBe(enEntry.documentId);
     });
 
     it('should download media when import file', async () => {
@@ -637,44 +604,41 @@ describe('import service', () => {
           utensils: {
             populate: true,
           },
-          localizations: true,
         },
       } as any);
 
       expect(entries.length).toBe(3);
 
-      expect(entries[0].name).toBe('Dubillot Brasserie');
-      expect(entries[0].locale).toBe('en');
-      expect(entries[0].description).toBe('Awesome restaurant');
-      expect(entries[0].owned_by.name).toBe('Charles');
-      expect(entries[0].utensils.length).toBe(2);
-      expect(entries[0].utensils[0].name).toBe('Fork');
-      expect(entries[0].utensils[0].made_by.name).toBe('Moulinex');
-      expect(entries[0].utensils[1].name).toBe('Knife');
-      expect(entries[0].utensils[1].made_by.name).toBe('SEB');
-      expect(entries[0].localizations.length).toBe(1);
-      expect(entries[0].localizations[0].name).toBe('Brasserie Dubillot');
-      expect(entries[0].localizations[0].locale).toBe('fr');
+      const enEntry = entries.find((e: any) => e.name === 'Dubillot Brasserie');
+      const frEntry = entries.find((e: any) => e.name === 'Brasserie Dubillot');
+      const martinEntry = entries.find((e: any) => e.name === 'Martin Brasserie');
 
-      expect(entries[1].name).toBe('Martin Brasserie');
-      expect(entries[1].locale).toBe('en');
-      expect(entries[1].description).toBe('Checkout the chicken');
-      expect(entries[1].owned_by.name).toBe('Victor');
-      expect(entries[1].utensils.length).toBe(1);
-      expect(entries[1].utensils[0].name).toBe('Fork');
+      expect(enEntry.locale).toBe('en');
+      expect(enEntry.description).toBe('Awesome restaurant');
+      expect(enEntry.owned_by.name).toBe('Charles');
+      expect(enEntry.utensils.length).toBe(2);
+      expect(enEntry.utensils[0].name).toBe('Fork');
+      expect(enEntry.utensils[0].made_by.name).toBe('Moulinex');
+      expect(enEntry.utensils[1].name).toBe('Knife');
+      expect(enEntry.utensils[1].made_by.name).toBe('SEB');
+      // In Strapi v5, the en and fr entries share the same documentId.
+      expect(enEntry.documentId).toBe(frEntry.documentId);
 
-      expect(entries[2].name).toBe('Brasserie Dubillot');
-      expect(entries[2].locale).toBe('fr');
-      expect(entries[2].description).toBe('Incroyable restaurant');
-      expect(entries[2].owned_by.name).toBe('Charles');
-      expect(entries[2].utensils.length).toBe(2);
-      expect(entries[2].utensils[0].name).toBe('Fork');
-      expect(entries[2].utensils[0].made_by.name).toBe('Moulinex');
-      expect(entries[2].utensils[1].name).toBe('Knife');
-      expect(entries[2].utensils[1].made_by.name).toBe('SEB');
-      expect(entries[2].localizations.length).toBe(1);
-      expect(entries[2].localizations[0].name).toBe('Dubillot Brasserie');
-      expect(entries[2].localizations[0].locale).toBe('en');
+      expect(martinEntry.locale).toBe('en');
+      expect(martinEntry.description).toBe('Checkout the chicken');
+      expect(martinEntry.owned_by.name).toBe('Victor');
+      expect(martinEntry.utensils.length).toBe(1);
+      expect(martinEntry.utensils[0].name).toBe('Fork');
+
+      expect(frEntry.locale).toBe('fr');
+      expect(frEntry.description).toBe('Incroyable restaurant');
+      expect(frEntry.owned_by.name).toBe('Charles');
+      expect(frEntry.utensils.length).toBe(2);
+      expect(frEntry.utensils[0].name).toBe('Fork');
+      expect(frEntry.utensils[0].made_by.name).toBe('Moulinex');
+      expect(frEntry.utensils[1].name).toBe('Knife');
+      expect(frEntry.utensils[1].made_by.name).toBe('SEB');
+      expect(frEntry.documentId).toBe(enEntry.documentId);
     });
 
     it('should download media only once when import same file multiple times', async () => {
@@ -699,43 +663,40 @@ describe('import service', () => {
           utensils: {
             populate: true,
           },
-          localizations: true,
         },
       } as any);
 
       expect(entries.length).toBe(3);
 
-      expect(entries[0].name).toBe('Dubillot Brasserie');
-      expect(entries[0].locale).toBe('en');
-      expect(entries[0].description).toBe('Awesome restaurant with insane wines');
-      expect(entries[0].owned_by.name).toBe('Charles Magne');
-      expect(entries[0].utensils.length).toBe(1);
-      expect(entries[0].utensils[0].name).toBe('Fork');
-      expect(entries[0].utensils[0].description).toBe('Really efficient in chess');
-      expect(entries[0].utensils[0].made_by.name).toBe('Moulinex');
-      expect(entries[0].localizations.length).toBe(1);
-      expect(entries[0].localizations[0].name).toBe('Brasserie Dubillot');
-      expect(entries[0].localizations[0].locale).toBe('fr');
+      const enEntry = entries.find((e: any) => e.name === 'Dubillot Brasserie');
+      const frEntry = entries.find((e: any) => e.name === 'Brasserie Dubillot');
+      const martinEntry = entries.find((e: any) => e.name === 'Martin Brasserie');
 
-      expect(entries[1].name).toBe('Martin Brasserie');
-      expect(entries[1].locale).toBe('en');
-      expect(entries[1].description).toBe('Checkout the chicken and the French fries');
-      expect(entries[1].owned_by.name).toBe('Victor Ovitch');
-      expect(entries[1].utensils.length).toBe(1);
-      expect(entries[1].utensils[0].name).toBe('Fork');
-      expect(entries[1].utensils[0].description).toBe('Really efficient in chess');
+      expect(enEntry.locale).toBe('en');
+      expect(enEntry.description).toBe('Awesome restaurant with insane wines');
+      expect(enEntry.owned_by.name).toBe('Charles Magne');
+      expect(enEntry.utensils.length).toBe(1);
+      expect(enEntry.utensils[0].name).toBe('Fork');
+      expect(enEntry.utensils[0].description).toBe('Really efficient in chess');
+      expect(enEntry.utensils[0].made_by.name).toBe('Moulinex');
+      // In Strapi v5, the en and fr entries share the same documentId.
+      expect(enEntry.documentId).toBe(frEntry.documentId);
 
-      expect(entries[2].name).toBe('Brasserie Dubillot');
-      expect(entries[2].locale).toBe('fr');
-      expect(entries[2].description).toBe('Incroyable restaurant avec ses excellents vins');
-      expect(entries[2].owned_by.name).toBe('Charles Magne');
-      expect(entries[2].utensils.length).toBe(1);
-      expect(entries[2].utensils[0].name).toBe('Fork');
-      expect(entries[2].utensils[0].description).toBe('Really efficient in chess');
-      expect(entries[2].utensils[0].made_by.name).toBe('Moulinex');
-      expect(entries[2].localizations.length).toBe(1);
-      expect(entries[2].localizations[0].name).toBe('Dubillot Brasserie');
-      expect(entries[2].localizations[0].locale).toBe('en');
+      expect(martinEntry.locale).toBe('en');
+      expect(martinEntry.description).toBe('Checkout the chicken and the French fries');
+      expect(martinEntry.owned_by.name).toBe('Victor Ovitch');
+      expect(martinEntry.utensils.length).toBe(1);
+      expect(martinEntry.utensils[0].name).toBe('Fork');
+      expect(martinEntry.utensils[0].description).toBe('Really efficient in chess');
+
+      expect(frEntry.locale).toBe('fr');
+      expect(frEntry.description).toBe('Incroyable restaurant avec ses excellents vins');
+      expect(frEntry.owned_by.name).toBe('Charles Magne');
+      expect(frEntry.utensils.length).toBe(1);
+      expect(frEntry.utensils[0].name).toBe('Fork');
+      expect(frEntry.utensils[0].description).toBe('Really efficient in chess');
+      expect(frEntry.utensils[0].made_by.name).toBe('Moulinex');
+      expect(frEntry.documentId).toBe(enEntry.documentId);
     });
   });
 });

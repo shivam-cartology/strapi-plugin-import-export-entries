@@ -62,7 +62,7 @@ async function setupDatabase() {
     const entry = await strapi.plugin('i18n').service('locales').findByCode(locale.code);
     if (!entry) {
       console.log(`Created locale: ${locale.name}`);
-      await strapi.query('plugin::i18n.locale').create({ data: { ...locale } });
+      await strapi.db.query('plugin::i18n.locale').create({ data: { ...locale } });
     }
   }
 }
