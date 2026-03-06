@@ -416,32 +416,35 @@ const updateOrCreateCollectionTypeEntry = async (
     const defaultLocale = await strapi.plugin('i18n').service('locales').getDefaultLocale();
     const isDatumInDefaultLocale = fileEntry.locale === defaultLocale;
 
-    let dbEntryDefaultLocaleId: EntryId | null = null;
-    let dbEntry: Entry | null = await strapi.db.query(slug).findOne({ where, populate: ['localizations'] });
-    if (isDatumInDefaultLocale) {
-      dbEntryDefaultLocaleId = dbEntry?.id || null;
-    } else {
-      if (dbEntry) {
-        // If `dbEntry` has been found, `dbEntry` holds the data for the default locale and
-        // the data for other locales in its `localizations` attribute.
-        const localizedEntries = [dbEntry, ...(dbEntry?.localizations || [])];
-        dbEntryDefaultLocaleId = localizedEntries.find((e) => e.locale === defaultLocale)?.id || null;
-        (dbEntry as any) = localizedEntries.find((e) => e.locale === fileEntry.locale) || null;
-      } else {
-        // Otherwise try to find dbEntry for default locale through localized siblings.
-        let idx = 0;
-        const fileLocalizationsIds = (fileEntry?.localizations as EntryId[]) || [];
-        while (idx < fileLocalizationsIds.length && !dbEntryDefaultLocaleId && !dbEntry) {
-          const dbId = fileIdToDbId.getMapping(slug, fileLocalizationsIds[idx]);
-          const localizedEntry: Entry = await strapi.db.query(slug).findOne({ where: { id: dbId }, populate: ['localizations'] });
-          const localizedEntries = localizedEntry != null ? [localizedEntry, ...(localizedEntry?.localizations || [])] : [];
-          if (!dbEntryDefaultLocaleId) {
-            dbEntryDefaultLocaleId = localizedEntries.find((e) => e.locale === defaultLocale)?.id || null;
-          }
-          if (!dbEntry) {
-            (dbEntry as any) = localizedEntries.find((e) => e.locale === fileEntry.locale) || null;
-          }
-          idx += 1;
+    // In Strapi v5, localizations are no longer stored as a relation.
+    // All locales of a document share the same documentId; use it to find locale-specific entries.
+    let dbEntry: Entry | null = await strapi.db.query(slug).findOne({ where });
+    let documentId: string | null = dbEntry?.documentId || null;
+
+    if (!documentId) {
+      // Try to find the document via localization siblings stored in the file.
+      const fileLocalizationsIds = (fileEntry?.localizations as EntryId[]) || [];
+      for (let idx = 0; idx < fileLocalizationsIds.length && !documentId; idx++) {
+        const dbId = fileIdToDbId.getMapping(slug, fileLocalizationsIds[idx]);
+        if (!dbId) continue;
+        const siblingWhere = typeof dbId === 'string' ? { documentId: dbId } : { id: dbId };
+        const sibling: Entry = await strapi.db.query(slug).findOne({ where: siblingWhere });
+        if (sibling) {
+          documentId = sibling.documentId;
+        }
+      }
+    }
+
+    // When the initial query may have returned a different locale, resolve the correct locale entries.
+    if (documentId) {
+      // Verify the default locale entry exists when needed for non-default locale import.
+      if (!isDatumInDefaultLocale) {
+        const dbEntryDefaultLocale =
+          dbEntry?.locale === defaultLocale
+            ? dbEntry
+            : await strapi.db.query(slug).findOne({ where: { documentId, locale: defaultLocale } });
+        if (!dbEntryDefaultLocale) {
+          throw new Error(`Could not find default locale entry to import localization for slug ${slug} (data ${JSON.stringify(fileEntry)})`);
         }
       }
     }
@@ -452,24 +455,23 @@ const updateOrCreateCollectionTypeEntry = async (
     }
 
     if (isDatumInDefaultLocale) {
-      if (!dbEntryDefaultLocaleId) {
+      if (!documentId) {
         return strapi.documents(slug).create({ data: fileEntry });
       } else {
-        // Find the documentId for the entry
-        const defaultEntry = await strapi.db.query(slug).findOne({ where: { id: dbEntryDefaultLocaleId } });
-        return strapi.documents(slug).update({ documentId: defaultEntry.documentId, data: omit({ ...fileEntry }, ['id', 'documentId']) });
+        return strapi.documents(slug).update({ documentId, locale: defaultLocale, data: omit({ ...fileEntry }, ['id', 'documentId']) });
       }
     } else {
-      if (!dbEntryDefaultLocaleId) {
+      if (!documentId) {
         throw new Error(`Could not find default locale entry to import localization for slug ${slug} (data ${JSON.stringify(fileEntry)})`);
       }
 
-      if (!dbEntry) {
-        const insertLocalizedEntry = strapi.plugin('i18n').service('core-api').createCreateLocalizationHandler(getModel(slug));
-        return insertLocalizedEntry({ id: dbEntryDefaultLocaleId, data: omit({ ...fileEntry }, ['id', 'documentId']) });
-      } else {
-        return strapi.documents(slug).update({ documentId: dbEntry.documentId, data: omit({ ...fileEntry }, ['id', 'documentId']) });
-      }
+      // In Strapi v5, use the Document Service to create or update a specific locale.
+      // Passing `locale` to `update` will create the locale if it does not yet exist.
+      return strapi.documents(slug).update({
+        documentId,
+        locale: fileEntry.locale as string,
+        data: omit({ ...fileEntry }, ['id', 'documentId']),
+      });
     }
   }
 };
@@ -515,13 +517,13 @@ const updateOrCreateSingleTypeEntry = async (
         return strapi.documents(slug).update({ documentId: entryDefaultLocale.documentId, data: fileEntry });
       }
     } else {
-      const entryLocale = await strapi.db.query(slug).findOne({ where: { locale: fileEntry.locale } });
-      let datumLocale = { ...entryLocale, ...fileEntry };
-
-      await strapi.db.query(slug).delete({ where: { locale: fileEntry.locale } });
-
-      const insertLocalizedEntry = strapi.plugin('i18n').service('core-api').createCreateLocalizationHandler(getModel(slug));
-      return insertLocalizedEntry({ id: entryDefaultLocale.id, data: datumLocale });
+      // In Strapi v5, use the Document Service to create or update a specific locale.
+      // Passing `locale` to `update` will upsert the locale on the existing document.
+      return strapi.documents(slug).update({
+        documentId: entryDefaultLocale.documentId,
+        locale: fileEntry.locale as string,
+        data: omit({ ...fileEntry }, ['id', 'documentId']),
+      });
     }
   }
 };

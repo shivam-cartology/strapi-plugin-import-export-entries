@@ -3,8 +3,7 @@
     "uuid": "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
   },
   "dependencies": {
-    "@strapi/plugin-i18n": "^4.3.6",
-    "@strapi/plugin-seo": "^1.7.4",
-    "@strapi/plugin-users-permissions": "^4.3.6"
+    "@strapi/plugin-seo": "^2.0.0",
+    "@strapi/plugin-users-permissions": "^5.0.0"
   }
 }
